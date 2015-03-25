@@ -1,6 +1,10 @@
 package org.example.graphx
 
-object Main extends App {
+import org.apache.spark.SparkContext.rddToPairRDDFunctions
+import org.apache.spark.graphx.{VertexId, PartitionStrategy, Graph, Edge}
+import org.apache.spark.rdd.RDD
+
+object CreateGraph extends App {
 
   val sc = SparkProvider.local
 
@@ -21,12 +25,12 @@ object Main extends App {
   val csvKeys = athleteType :: 'age :: countryType :: yearType :: 'closing_date :: sportType :: 'gold_m :: 'silver_m :: 'bronze_m :: 'total_m :: Nil
 
   try {
-    val csvRows = sc.textFile(getClass.getClassLoader.getResource("OlympicAthletes_0.csv").getFile)
+    val csvRows: RDD[Map[NodeType, String]] = sc.textFile(getClass.getClassLoader.getResource("OlympicAthletes_0.csv").getFile)
       .map(line => (csvKeys zip line.split(";")).toMap)
       .filter(_(athleteType) != "Athlete") // Skip header
 
     // Constructing nodes and assigning IDs
-    val vertices = (
+    val vertices: RDD[(Node, VertexId)] = (
       nodesByTypeFromRows(csvRows, athleteType)
         ++ nodesByTypeFromRows(csvRows, countryType)
         ++ nodesByTypeFromRows(csvRows, sportType)
@@ -34,14 +38,16 @@ object Main extends App {
       )
       .zipWithUniqueId()
 
-    def filterVerticesByType(nodeType: NodeType) = vertices.collect {
+    def filterVerticesByType(nodeType: NodeType): RDD[(String, VertexId)] = vertices.collect {
       case (node, id) if node.hasType(nodeType) => node.properties(nodeType).toString -> id
     }
 
-    val athleteNamesWithCsvRows = csvRows.map(row => row(athleteType) -> row).join(filterVerticesByType(athleteType))
+    val athleteNamesWithCsvRows: RDD[(String, (Map[NodeType, String], VertexId))] = csvRows
+      .map(row => row(athleteType) -> row)
+      .join(filterVerticesByType(athleteType))
 
     // Constructing edges between athlete nodes and connected data
-    val edges = for {
+    val edges: List[RDD[Edge[Int]]] = for {
       nodeType <- countryType :: sportType :: yearType :: Nil
     } yield {
       athleteNamesWithCsvRows
@@ -50,7 +56,7 @@ object Main extends App {
         .map { case (_, (athleteId, nodeId)) => Edge(athleteId, nodeId, 0)}
     }
 
-    val originalGraph = Graph(vertices.map(_.swap), edges.reduce(_ ++ _), EmptyNode)
+    val originalGraph: Graph[Node, Int] = Graph(vertices.map(_.swap), edges.reduce(_ ++ _), EmptyNode)
       .partitionBy(PartitionStrategy.RandomVertexCut)
       .groupEdges(_ + _)
 
