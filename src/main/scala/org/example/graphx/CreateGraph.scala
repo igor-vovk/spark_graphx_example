@@ -8,13 +8,6 @@ object CreateGraph extends App {
 
   val sc = SparkProvider.local
 
-  def nodesByTypeFromRows(csvRows: RDD[Map[Symbol, String]], nodeType: Symbol): RDD[Node] = {
-    csvRows
-      .map(_.filterKeys(nodeType.equals(_)).map(identity))
-      .distinct()
-      .map(new TypedNode(nodeType, _))
-  }
-
   println("===========================================================")
 
   val athleteType = 'athlete
@@ -27,7 +20,14 @@ object CreateGraph extends App {
   try {
     val csvRows: RDD[Map[NodeType, String]] = sc.textFile(getClass.getClassLoader.getResource("OlympicAthletes_0.csv").getFile)
       .map(line => (csvKeys zip line.split(";")).toMap)
-      .filter(_(athleteType) != "Athlete") // Skip header
+      .filter(row => row(athleteType) != "Athlete") // Skip header
+
+    def nodesByTypeFromRows(csvRows: RDD[Map[Symbol, String]], nodeType: Symbol): RDD[Node] = {
+      csvRows
+        .map(row => row.filterKeys(key => nodeType == key))
+        .distinct()
+        .map(props => new TypedNode(nodeType, props))
+    }
 
     // Constructing nodes and assigning IDs
     val vertices: RDD[(Node, VertexId)] = (
